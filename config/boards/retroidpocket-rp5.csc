@@ -42,14 +42,8 @@ function pre_customize_image__retroidpocket-rp5_alsa_ucm_conf() {
 	)
 }
 
+# bsp-cli is shared by all releases: do not check RELEASE here.
 function post_family_tweaks_bsp__retroidpocket-rp5_add_services() {
-	if ! retroidpocket-rp5_is_userspace_supported; then
-		if [[ "${RELEASE}" != "" ]]; then
-			display_alert "Missing userspace for ${BOARD}" "${RELEASE} does not have the userspace necessary to support the ${BOARD}" "warn"
-		fi
-		return 0
-	fi
-
 	display_alert "$BOARD" "Add services" "info"
 
 	# Bluetooth MAC addr setup service
