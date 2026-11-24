@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ROCKNIX Team <admin@rocknix.org>
+Date: Sun, 13 Jul 2025 00:00:00 +0000
+Subject: [PATCH] ASoC: qcom: sm8250: force S16_LE only for compressed playback
+
+The backend fixup forced S16_LE for all streams. PCM playback then lost
+resolution after software volume: at low volume the audio distorted.
+Let PCM streams negotiate the format.
+
+Taken from ROCKNIX (projects/ROCKNIX/devices/SM8250/patches/linux/0100).
+
+---
+diff --git a/sound/soc/qcom/sm8250.c b/sound/soc/qcom/sm8250.c
+--- a/sound/soc/qcom/sm8250.c
++++ b/sound/soc/qcom/sm8250.c
+@@ -121,7 +121,14 @@
+ 
+ 	rate->min = rate->max = 48000;
+ 	channels->min = channels->max = 2;
+-	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
++
++	/* Only force S16_LE format for compressed playback */
++	if (rtd->dai_link->compr_ops) {
++		/* This is a compressed stream, set format to S16_LE */
++		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
++	} else {
++		/* For other streams, let format be negotiated as before */
++	}
+ 
+ 	return 0;
+ }
