@@ -8,7 +8,8 @@ declare -g KERNEL_TARGET="current,edge"
 declare -g EXTRAWIFI="no"
 declare -g MODULES="panel_ddic_ch13726a"
 declare -g BOOTCONFIG="none"
-declare -g GOVERNOR="schedutil" # The kernel default is conservative: slow to raise the clock under load.
+declare -g GOVERNOR="schedutil"            # The kernel default is conservative: slow to raise the clock under load.
+declare -g POWER_MANAGEMENT_FEATURES="yes" # Tested on RP5: suspend and resume work.
 
 declare -g UEFI_GRUB_TERMINAL="gfxterm" # Use graphics in grub, for the Armbian wallpaper.
 declare -g GRUB_CMDLINE_LINUX_DEFAULT="clk_ignore_unused pd_ignore_unused arm64.nopauth efi=noruntime fbcon=rotate:3 console=ttyMSM0,115200n8"
