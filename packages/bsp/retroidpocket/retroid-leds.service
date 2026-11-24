@@ -1,0 +1,13 @@
+[Unit]
+Description=Retroid Pocket joystick LEDs: brightness control and color save
+After=systemd-remount-fs.service systemd-modules-load.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/retroid-leds/retroid-leds run
+ExecStop=/usr/lib/retroid-leds/retroid-leds save
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @description Retroid Pocket SM8250 userspace in the bsp-cli package: the ALSA UCM config, and the schedutil CPU governor default for existing installs. A package update then delivers changes without a new image.
+# @description Retroid Pocket SM8250 userspace in the bsp-cli package: the ALSA UCM config, the joystick LED brightness control and color save, and the schedutil CPU governor default for existing installs. A package update then delivers changes without a new image.
 
 function extension_prepare_config__retroidpocket() {
 	# RetroidPocket/alsa-ucm-conf, branch rp/v1.2.13
@@ -75,6 +75,26 @@ function post_family_tweaks_bsp__retroidpocket_ucm() {
 		retroid-RetroidPocket5- retroid-RetroidPocketMini-; do
 		ln -sfn ../../Retroid/Qualcomm/sm8250/RetroidPocket.conf "${ucm}/conf.d/sm8250/${name}.conf"
 	done
+}
+
+# Joystick LEDs: a brightness control for the desktop, and the colors saved across reboots.
+function post_family_tweaks_bsp__retroidpocket_leds() {
+	display_alert "Adding to bsp-cli" "${BOARD}: joystick LED brightness control and color save" "info"
+	install -Dm755 "${SRC}/packages/bsp/retroidpocket/retroid-leds" "${destination}/usr/lib/retroid-leds/retroid-leds"
+	install -Dm644 "${SRC}/packages/bsp/retroidpocket/retroid-leds.service" "${destination}/usr/lib/systemd/system/retroid-leds.service"
+	postinst_functions+=(retroidpocket_bsp_cli_postinst_leds)
+}
+
+# Copied inline into the bsp-cli postinst, so no return or local.
+# Enable the service. On a running system, restart it: the stop saves the colors.
+function retroidpocket_bsp_cli_postinst_leds() {
+	if [[ "$1" == "configure" ]]; then
+		systemctl --no-reload enable retroid-leds.service > /dev/null 2>&1 || true
+		if [[ -d /run/systemd/system ]]; then
+			systemctl daemon-reload
+			systemctl restart retroid-leds.service || true
+		fi
+	fi
 }
 
 function post_family_tweaks_bsp__retroidpocket_governor() {
