@@ -1,0 +1,146 @@
+#!/bin/bash
+# Fan control for Retroid Pocket SM8250 devices.
+# The pwm-fan driver starts the fan at 100%. This script sets it from the CPU and GPU temperature,
+# or to a fixed speed. The mode is kept in /etc/default/retroid-fan.
+#
+# Usage:
+#   retroid-fan              Show the mode, the temperature and the fan speed.
+#   retroid-fan auto         Set the speed from the temperature.
+#   retroid-fan set PERCENT  Set a fixed speed, 0 to 100.
+#   retroid-fan run          Apply the saved mode. retroid-fan.service runs this at boot.
+set -euo pipefail
+
+CONF="/etc/default/retroid-fan"
+
+# Fan curve from the AYN Android kernel for these devices (Ayn8250Dev/android_kernel_ayn_sxr2130p, lineage-24.0).
+# Step i uses PWM LEVELS[i] (0-255). Step i starts at TRIPS[i-1] degrees C. A step goes down HYST degrees below its start.
+LEVELS=(0 40 65 75 90 100 120 150 175)
+TRIPS=(50 55 60 65 70 75 80 85)
+HYST=5
+INTERVAL=2 # seconds between readings
+
+die() {
+	echo "retroid-fan: $*" >&2
+	exit 1
+}
+
+find_pwm() {
+	declare hwmon
+	for hwmon in /sys/class/hwmon/hwmon*; do
+		if [[ "$(cat "${hwmon}/name" 2> /dev/null)" == "pwmfan" && -w "${hwmon}/pwm1" ]]; then
+			echo "${hwmon}/pwm1"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Highest temperature of the CPU and GPU thermal zones, in degrees C.
+max_temp() {
+	declare zone type t max=-1
+	for zone in /sys/class/thermal/thermal_zone*; do
+		type="$(cat "${zone}/type" 2> /dev/null)" || continue
+		[[ "${type}" == cpu* || "${type}" == gpu* ]] || continue
+		t="$(cat "${zone}/temp" 2> /dev/null)" || continue
+		[[ "${t}" =~ ^-?[0-9]+$ ]] || continue
+		((t / 1000 > max)) && max=$((t / 1000))
+	done
+	((max >= 0)) || return 1
+	echo "${max}"
+}
+
+# Next step from the current step and the temperature.
+next_step() {
+	declare step="$1" temp="$2" up=0 trip
+	for trip in "${TRIPS[@]}"; do
+		((temp >= trip)) && up=$((up + 1))
+	done
+	if ((up > step)); then
+		step="${up}"
+	else
+		while ((step > 0 && temp < TRIPS[step - 1] - HYST)); do
+			step=$((step - 1))
+		done
+	fi
+	echo "${step}"
+}
+
+read_conf() {
+	MODE="auto"
+	SPEED=""
+	# shellcheck disable=SC1090
+	[[ -r "${CONF}" ]] && source "${CONF}"
+	return 0
+}
+
+write_conf() {
+	[[ "$(id -u)" -eq 0 ]] || die "run as root to change the fan mode"
+	printf 'MODE=%s\nSPEED=%s\n' "$1" "$2" > "${CONF}"
+}
+
+restart_service() {
+	if command -v systemctl > /dev/null && systemctl is-enabled --quiet retroid-fan.service 2> /dev/null; then
+		systemctl restart retroid-fan.service
+	else
+		"$0" run &
+		disown
+	fi
+}
+
+status() {
+	declare pwm temp
+	read_conf
+	pwm="$(find_pwm)" || die "pwm-fan not found"
+	temp="$(max_temp)" || temp="?"
+	echo "mode: ${MODE}${SPEED:+ (${SPEED}%)}"
+	echo "temperature: ${temp} C"
+	echo "fan: $(($(cat "${pwm}") * 100 / 255))%"
+}
+
+run() {
+	declare pwm temp step=0 last=-1
+	read_conf
+	pwm="$(find_pwm)" || die "pwm-fan not found"
+	if [[ "${MODE}" == "manual" ]]; then
+		if [[ ! "${SPEED}" =~ ^[0-9]+$ ]] || ((SPEED > 100)); then
+			die "SPEED in ${CONF} must be 0 to 100"
+		fi
+		echo $((SPEED * 255 / 100)) > "${pwm}"
+		return 0
+	fi
+	[[ "${MODE}" == "auto" ]] || die "MODE in ${CONF} must be auto or manual"
+	while true; do
+		if temp="$(max_temp)"; then
+			step="$(next_step "${step}" "${temp}")"
+		else
+			step=$((${#LEVELS[@]} - 1)) # no temperature: run at the highest step
+		fi
+		if ((step != last)); then
+			echo "${LEVELS[step]}" > "${pwm}"
+			last="${step}"
+		fi
+		sleep "${INTERVAL}"
+	done
+}
+
+case "${1:-status}" in
+	status) status ;;
+	run) run ;;
+	auto)
+		write_conf auto ""
+		restart_service
+		status
+		;;
+	set)
+		if [[ ! "${2:-}" =~ ^[0-9]+$ ]] || (($2 > 100)); then
+			die "usage: retroid-fan set PERCENT (0 to 100)"
+		fi
+		write_conf manual "$2"
+		restart_service
+		status
+		;;
+	*)
+		echo "usage: retroid-fan [status | auto | set PERCENT | run]" >&2
+		exit 2
+		;;
+esac

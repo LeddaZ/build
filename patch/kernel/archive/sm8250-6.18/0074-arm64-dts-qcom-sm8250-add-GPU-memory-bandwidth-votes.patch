@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Leonardo Ledda <leonardoledda@gmail.com>
+Date: Tue, 24 Nov 2026 16:00:00 +0100
+Subject: [PATCH] arm64: dts: qcom: sm8250: add GPU memory bandwidth votes
+
+The GPU has no interconnect path. DDR does not scale up for GPU load.
+Add the path and a peak bandwidth vote for each GPU OPP.
+The votes match the stock DDR levels (AYN sxr2130p kernel, LPDDR4X table).
+ROCKNIX uses the same values.
+
+---
+diff --git a/arch/arm64/boot/dts/qcom/sm8250.dtsi b/arch/arm64/boot/dts/qcom/sm8250.dtsi
+--- a/arch/arm64/boot/dts/qcom/sm8250.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm8250.dtsi
+@@ -2964,6 +2964,9 @@
+ 
+ 			iommus = <&adreno_smmu 0 0x401>;
+ 
++			interconnects = <&gem_noc MASTER_GRAPHICS_3D 0 &mc_virt SLAVE_EBI_CH0 0>;
++			interconnect-names = "gfx-mem";
++
+ 			operating-points-v2 = <&gpu_opp_table>;
+ 
+ 			qcom,gmu = <&gmu>;
+@@ -2985,42 +2988,49 @@
+ 					opp-hz = /bits/ 64 <670000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_NOM_L1>;
+ 					opp-supported-hw = <0xa>;
++					opp-peak-kBps = <8171875>;
+ 				};
+ 
+ 				opp-587000000 {
+ 					opp-hz = /bits/ 64 <587000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_NOM>;
+ 					opp-supported-hw = <0xb>;
++					opp-peak-kBps = <8171875>;
+ 				};
+ 
+ 				opp-525000000 {
+ 					opp-hz = /bits/ 64 <525000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_SVS_L2>;
+ 					opp-supported-hw = <0xf>;
++					opp-peak-kBps = <6074218>;
+ 				};
+ 
+ 				opp-490000000 {
+ 					opp-hz = /bits/ 64 <490000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
+ 					opp-supported-hw = <0xf>;
++					opp-peak-kBps = <6074218>;
+ 				};
+ 
+ 				opp-441600000 {
+ 					opp-hz = /bits/ 64 <441600000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_SVS_L0>;
+ 					opp-supported-hw = <0xf>;
++					opp-peak-kBps = <6074218>;
+ 				};
+ 
+ 				opp-400000000 {
+ 					opp-hz = /bits/ 64 <400000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_SVS>;
+ 					opp-supported-hw = <0xf>;
++					opp-peak-kBps = <3972656>;
+ 				};
+ 
+ 				opp-305000000 {
+ 					opp-hz = /bits/ 64 <305000000>;
+ 					opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
+ 					opp-supported-hw = <0xf>;
++					opp-peak-kBps = <1761718>;
+ 				};
+ 			};
+ 		};

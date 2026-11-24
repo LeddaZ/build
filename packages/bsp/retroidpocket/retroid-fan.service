@@ -1,0 +1,12 @@
+[Unit]
+Description=Retroid Pocket fan control
+After=systemd-modules-load.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/retroid-fan run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

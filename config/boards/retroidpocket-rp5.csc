@@ -8,6 +8,7 @@ declare -g KERNEL_TARGET="current,edge"
 declare -g EXTRAWIFI="no"
 declare -g MODULES="panel_ddic_ch13726a"
 declare -g BOOTCONFIG="none"
+declare -g GOVERNOR="schedutil" # The kernel default is conservative: slow to raise the clock under load.
 
 declare -g UEFI_GRUB_TERMINAL="gfxterm" # Use graphics in grub, for the Armbian wallpaper.
 declare -g GRUB_CMDLINE_LINUX_DEFAULT="clk_ignore_unused pd_ignore_unused arm64.nopauth efi=noruntime fbcon=rotate:3 console=ttyMSM0,115200n8"
@@ -17,6 +18,9 @@ declare -g SERIALCON="${SERIALCON:-tty1}"
 
 enable_extension "grub"
 enable_extension "grub-with-dtb" # important, puts the whole DTB handling in place.
+enable_extension "openabl"
+enable_extension "retroidpocket"
+declare -g OPENABL_CHIPSET="SM8250"
 
 # declare -g BOOT_LOGO=desktop
 
@@ -27,29 +31,12 @@ function retroidpocket-rp5_is_userspace_supported() {
 	[[ "${RELEASE}" == "bookworm" ]] && return 0
 	[[ "${RELEASE}" == "noble" ]] && return 0
 	[[ "${RELEASE}" == "trixie" ]] && return 0
+	[[ "${RELEASE}" == "resolute" ]] && return 0
 	return 1
 }
 
-function pre_customize_image__retroidpocket-rp5_alsa_ucm_conf() {
-	if ! retroidpocket-rp5_is_userspace_supported; then
-		return 0
-	fi
-
-	display_alert "Add alsa-ucm-conf for ${BOARD}" "${RELEASE}" "warn"
-	(
-		cd "${SDCARD}/usr/share/alsa" || exit 6
-		curl -L "https://github.com/RetroidPocket/alsa-ucm-conf/archive/refs/heads/rp/v1.2.13.tar.gz" | tar xvzf - --strip-components=1
-	)
-}
-
+# bsp-cli is shared by all releases: do not check RELEASE here.
 function post_family_tweaks_bsp__retroidpocket-rp5_add_services() {
-	if ! retroidpocket-rp5_is_userspace_supported; then
-		if [[ "${RELEASE}" != "" ]]; then
-			display_alert "Missing userspace for ${BOARD}" "${RELEASE} does not have the userspace necessary to support the ${BOARD}" "warn"
-		fi
-		return 0
-	fi
-
 	display_alert "$BOARD" "Add services" "info"
 
 	# Bluetooth MAC addr setup service
@@ -61,6 +48,10 @@ function post_family_tweaks_bsp__retroidpocket-rp5_add_services() {
 	# Haptic and Gamepad rules
 	install -Dm644 $SRC/packages/bsp/retroidpocket/90-feedbackd-spmi-haptics.rules $destination/etc/udev/rules.d/90-feedbackd-spmi-haptics.rules
 	install -Dm644 $SRC/packages/bsp/retroidpocket/99-ignore-gamepad.rules $destination/etc/udev/rules.d/99-ignore-gamepad.rules
+
+	# Fan control: the pwm-fan driver starts the fan at 100%
+	install -Dm755 "${SRC}/packages/bsp/retroidpocket/retroid-fan" "${destination}/usr/bin/retroid-fan"
+	install -Dm644 "${SRC}/packages/bsp/retroidpocket/retroid-fan.service" "${destination}/usr/lib/systemd/system/retroid-fan.service"
 }
 
 function post_family_tweaks__retroidpocket-rp5_enable_services() {
@@ -75,6 +66,12 @@ function post_family_tweaks__retroidpocket-rp5_enable_services() {
 
 	chroot_sdcard systemctl enable bt-fixed-mac.service
 	return 0
+}
+
+# The fan needs no release-specific userspace: enable it for all releases.
+function post_family_tweaks__retroidpocket-rp5_enable_fan() {
+	display_alert "$BOARD" "Enable fan control" "info"
+	chroot_sdcard systemctl enable retroid-fan.service
 }
 
 function post_family_config__retroidpocket-rp5_extra_packages() {
@@ -108,11 +105,11 @@ function post_family_tweaks_bsp__retroidpocket-rp5_bsp_firmware_in_initrd() {
 }
 
 ## Modules, required to boot, add them to initrd
+# Variant boards set MODULES to their panel driver.
 function post_family_tweaks_bsp__retroidpocket-rp5_bsp_modules_in_initrd() {
-	display_alert "Adding to bsp-cli" "${BOARD}: modules in initrd" "info"
-	add_file_from_stdin_to_bsp_destination "/etc/initramfs-tools/modules" <<- 'EXTRA_MODULES'
-		panel-ddic-ch13726a
-	EXTRA_MODULES
+	display_alert "Adding to bsp-cli" "${BOARD}: modules in initrd: ${MODULES}" "info"
+	# shellcheck disable=SC2086 # one module per word
+	printf '%s\n' ${MODULES} | add_file_from_stdin_to_bsp_destination "/etc/initramfs-tools/modules"
 }
 
 # armbian-firstrun waits for systemd to be ready, but snapd.seeded might cause it to hang due to wrong clock.

@@ -1,0 +1,91 @@
+#!/bin/bash
+# Joystick LEDs of the Retroid Pocket: the RGB LEDs rgb:l1..l4 and rgb:r1..r4.
+#
+# Usage:
+#   retroid-leds run      Restore the saved colors. Then add the LED joysticks::kbd_backlight:
+#                         UPower reports it, and the desktop shows a brightness control.
+#                         Its brightness goes to all joystick LEDs. Their colors stay.
+#   retroid-leds save     Save the colors. retroid-leds.service runs this at shutdown.
+#   retroid-leds restore  Write the saved colors back.
+set -euo pipefail
+
+LEDS="/sys/class/leds"
+STATE="/var/lib/retroid-leds"
+NAME="joysticks::kbd_backlight"
+
+die() {
+	echo "retroid-leds: $*" >&2
+	exit 1
+}
+
+joystick_leds() {
+	declare led
+	for led in "${LEDS}"/rgb:[lr][1-4]; do
+		if [[ -e "${led}/multi_intensity" ]]; then
+			echo "${led}"
+		fi
+	done
+	return 0
+}
+
+save() {
+	declare led
+	mkdir -p "${STATE}"
+	for led in $(joystick_leds); do
+		cat "${led}/multi_intensity" > "${STATE}/${led##*/}.tmp"
+		mv "${STATE}/${led##*/}.tmp" "${STATE}/${led##*/}"
+	done
+}
+
+restore() {
+	declare led
+	for led in $(joystick_leds); do
+		[[ -r "${STATE}/${led##*/}" ]] || continue
+		if ! cat "${STATE}/${led##*/}" > "${led}/multi_intensity"; then
+			echo "retroid-leds: cannot restore the color of ${led##*/}" >&2
+		fi
+	done
+}
+
+run() {
+	declare pad="" dev value led
+	# The LED drivers are modules: wait for the joystick LEDs.
+	for _ in $(seq 30); do
+		[[ -n "$(joystick_leds)" ]] && break
+		sleep 1
+	done
+	[[ -n "$(joystick_leds)" ]] || die "no joystick LEDs in ${LEDS}"
+	restore
+
+	modprobe uleds 2> /dev/null || true
+	exec 3<> /dev/uleds || die "cannot open /dev/uleds"
+	# struct uleds_user_dev: char name[64], then int max_brightness (255, little-endian).
+	# The kernel accepts it only in one write of the full size: dd writes it in one call.
+	for _ in $(seq $((64 - ${#NAME}))); do
+		pad+='\000'
+	done
+	dev="$(mktemp)"
+	# shellcheck disable=SC2059 # the format holds the octal escapes
+	printf "${NAME}${pad}\\377\\000\\000\\000" > "${dev}"
+	dd if="${dev}" bs=68 count=1 conv=notrunc status=none >&3
+	rm -f "${dev}"
+
+	# Each read returns the new brightness as an int.
+	while true; do
+		value="$(dd bs=4 count=1 status=none <&3 | od -An -tu4 | tr -d ' ')"
+		[[ "${value}" =~ ^[0-9]+$ ]] || die "bad read from /dev/uleds"
+		for led in $(joystick_leds); do
+			echo "${value}" > "${led}/brightness"
+		done
+	done
+}
+
+case "${1:-}" in
+	run) run ;;
+	save) save ;;
+	restore) restore ;;
+	*)
+		echo "usage: retroid-leds run|save|restore" >&2
+		exit 2
+		;;
+esac
