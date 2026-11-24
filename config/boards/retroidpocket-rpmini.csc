@@ -19,6 +19,7 @@ declare -g SERIALCON="${SERIALCON:-tty1}"
 enable_extension "grub"
 enable_extension "grub-with-dtb" # important, puts the whole DTB handling in place.
 enable_extension "openabl"
+enable_extension "retroidpocket"
 declare -g OPENABL_CHIPSET="SM8250"
 
 # declare -g BOOT_LOGO=desktop
@@ -32,27 +33,6 @@ function retroidpocket-rpmini_is_userspace_supported() {
 	[[ "${RELEASE}" == "trixie" ]] && return 0
 	[[ "${RELEASE}" == "resolute" ]] && return 0
 	return 1
-}
-
-function pre_customize_image__retroidpocket-rpmini_alsa_ucm_conf() {
-	if ! retroidpocket-rpmini_is_userspace_supported; then
-		return 0
-	fi
-
-	display_alert "Add alsa-ucm-conf for ${BOARD}" "${RELEASE}" "warn"
-	(
-		cd "${SDCARD}/usr/share/alsa" || exit 6
-		curl -L "https://github.com/RetroidPocket/alsa-ucm-conf/archive/refs/heads/rp/v1.2.13.tar.gz" | tar xvzf - --strip-components=1
-		# The card long name comes from the SMBIOS data of the boot loader (U-Boot or OpenABL).
-		# Link each known name to the Retroid Pocket config, as ROCKNIX does.
-		cd ucm2/conf.d/sm8250 || exit 6
-		for name in RetroidPocket \
-			retroidpocket-RetroidPocket5 retroidpocket-RetroidPocketFlip2 retroidpocket-RetroidPocketMini retroidpocket-RetroidPocketMiniV2 \
-			retroidpocket-RetroidPocket5- retroidpocket-RetroidPocketFlip2- retroidpocket-RetroidPocketMini- retroidpocket-RetroidPocketMiniV2- \
-			retroid-RetroidPocket5- retroid-RetroidPocketMini-; do
-			[[ -e "${name}.conf" ]] || ln -sv ../../Qualcomm/sm8250/RetroidPocket.conf "${name}.conf"
-		done
-	)
 }
 
 # bsp-cli is shared by all releases: do not check RELEASE here.
