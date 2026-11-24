@@ -29,6 +29,7 @@ function retroidpocket-rp5_is_userspace_supported() {
 	[[ "${RELEASE}" == "bookworm" ]] && return 0
 	[[ "${RELEASE}" == "noble" ]] && return 0
 	[[ "${RELEASE}" == "trixie" ]] && return 0
+	[[ "${RELEASE}" == "resolute" ]] && return 0
 	return 1
 }
 
