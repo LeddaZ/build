@@ -17,6 +17,8 @@ declare -g SERIALCON="${SERIALCON:-tty1}"
 
 enable_extension "grub"
 enable_extension "grub-with-dtb" # important, puts the whole DTB handling in place.
+enable_extension "openabl"
+declare -g OPENABL_CHIPSET="SM8250"
 
 # declare -g BOOT_LOGO=desktop
 
