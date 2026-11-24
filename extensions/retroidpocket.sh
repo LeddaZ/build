@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @description Retroid Pocket SM8250 userspace in the bsp-cli package: the ALSA UCM config, the joystick LED brightness control and color save, and the schedutil CPU governor default for existing installs. A package update then delivers changes without a new image.
+# @description Retroid Pocket SM8250 userspace in the bsp-cli package: the ALSA UCM config, the joystick LED brightness control and color save, the KWin on-screen keyboard setting, and the schedutil CPU governor default for existing installs. A package update then delivers changes without a new image.
 
 function extension_prepare_config__retroidpocket() {
 	# RetroidPocket/alsa-ucm-conf, branch rp/v1.2.13
@@ -95,6 +95,22 @@ function retroidpocket_bsp_cli_postinst_leds() {
 			systemctl restart retroid-leds.service || true
 		fi
 	fi
+}
+
+# On-screen keyboard for the touchscreen. plasma-keyboard is in Plasma 6.4 and later: resolute.
+function post_family_config__retroidpocket_onscreen_keyboard() {
+	[[ "${BUILD_DESKTOP}" == "yes" && "${DESKTOP_ENVIRONMENT}" == "kde-plasma" && "${RELEASE}" == "resolute" ]] || return 0
+	display_alert "Adding on-screen keyboard for ${BOARD}" "plasma-keyboard" "info"
+	add_packages_to_image "plasma-keyboard"
+}
+
+# KWin starts plasma-keyboard as input method. Without the package, KWin starts no input method.
+function post_family_tweaks_bsp__retroidpocket_onscreen_keyboard() {
+	display_alert "Adding to bsp-cli" "${BOARD}: KWin input method plasma-keyboard" "info"
+	add_file_from_stdin_to_bsp_destination "/etc/xdg/kwinrc" <<- 'KWINRC'
+		[Wayland]
+		InputMethod=/usr/share/applications/org.kde.plasma.keyboard.desktop
+	KWINRC
 }
 
 function post_family_tweaks_bsp__retroidpocket_governor() {
