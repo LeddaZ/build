@@ -41,6 +41,15 @@ function pre_customize_image__retroidpocket-rpmini_alsa_ucm_conf() {
 	(
 		cd "${SDCARD}/usr/share/alsa" || exit 6
 		curl -L "https://github.com/RetroidPocket/alsa-ucm-conf/archive/refs/heads/rp/v1.2.13.tar.gz" | tar xvzf - --strip-components=1
+		# The card long name comes from the SMBIOS data of the boot loader (U-Boot or OpenABL).
+		# Link each known name to the Retroid Pocket config, as ROCKNIX does.
+		cd ucm2/conf.d/sm8250 || exit 6
+		for name in RetroidPocket \
+			retroidpocket-RetroidPocket5 retroidpocket-RetroidPocketFlip2 retroidpocket-RetroidPocketMini retroidpocket-RetroidPocketMiniV2 \
+			retroidpocket-RetroidPocket5- retroidpocket-RetroidPocketFlip2- retroidpocket-RetroidPocketMini- retroidpocket-RetroidPocketMiniV2- \
+			retroid-RetroidPocket5- retroid-RetroidPocketMini-; do
+			[[ -e "${name}.conf" ]] || ln -sv ../../Qualcomm/sm8250/RetroidPocket.conf "${name}.conf"
+		done
 	)
 }
 
