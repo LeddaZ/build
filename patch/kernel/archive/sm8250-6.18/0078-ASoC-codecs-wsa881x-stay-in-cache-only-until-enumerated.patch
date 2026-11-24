@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Leonardo Ledda <leonardoledda@gmail.com>
+Date: Tue, 24 Nov 2026 18:00:00 +0100
+Subject: [PATCH] ASoC: codecs: wsa881x: stay in cache-only until enumerated
+
+At boot, the mixer setup accessed the speaker amplifier before SoundWire
+enumeration. The transfers went to device 0 and failed with -EIO.
+A runtime resume that timed out then left -ETIMEDOUT as runtime error,
+and every later open of the speaker failed with -EINVAL.
+
+Start in cache-only, as wsa884x does. Leave it when the device attaches,
+and sync the cache after the init. Return -EAGAIN on a resume timeout,
+so that a later resume tries again.
+
+---
+diff --git a/sound/soc/codecs/wsa881x.c b/sound/soc/codecs/wsa881x.c
+--- a/sound/soc/codecs/wsa881x.c
++++ b/sound/soc/codecs/wsa881x.c
+@@ -1073,11 +1073,18 @@
+ {
+ 	struct wsa881x_priv *wsa881x = dev_get_drvdata(&slave->dev);
+ 
+-	if (status == SDW_SLAVE_UNATTACHED)
++	if (status == SDW_SLAVE_UNATTACHED) {
+ 		wsa881x->hw_init = false;
++		regcache_cache_only(wsa881x->regmap, true);
++		regcache_mark_dirty(wsa881x->regmap);
++		return 0;
++	}
+ 
+-	if (status == SDW_SLAVE_ATTACHED && slave->dev_num > 0)
++	if (status == SDW_SLAVE_ATTACHED && slave->dev_num > 0) {
++		regcache_cache_only(wsa881x->regmap, false);
+ 		wsa881x_init(wsa881x);
++		regcache_sync(wsa881x->regmap);
++	}
+ 
+ 	return 0;
+ }
+@@ -1165,6 +1172,9 @@
+ 	if (IS_ERR(wsa881x->regmap))
+ 		return dev_err_probe(dev, PTR_ERR(wsa881x->regmap), "regmap_init failed\n");
+ 
++	/* Start in cache-only until the device is enumerated */
++	regcache_cache_only(wsa881x->regmap, true);
++
+ 	pm_runtime_set_autosuspend_delay(dev, 3000);
+ 	pm_runtime_use_autosuspend(dev);
+ 	pm_runtime_mark_last_busy(dev);
+@@ -1204,7 +1214,8 @@
+ 	if (!time) {
+ 		dev_err(dev, "Initialization not complete, timed out\n");
+ 		gpiod_direction_output(wsa881x->sd_n, wsa881x->sd_n_val);
+-		return -ETIMEDOUT;
++		/* -EAGAIN: the PM core keeps other errors, and no later resume is tried. */
++		return -EAGAIN;
+ 	}
+ 
+ 	regcache_cache_only(regmap, false);
