@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Leonardo Ledda <leonardoledda@gmail.com>
+Date: Tue, 24 Nov 2026 17:00:00 +0100
+Subject: [PATCH] ASoC: qcom: q6afe: retry the LPASS vote on a DSP error
+
+Just after the AFE service starts, the DSP can reject the LPASS core vote:
+  qcom-q6afe aprsvc:service:4:4: cmd = 0x100f4 returned error = 0x16
+The error reply has the APR_BASIC_RSP_RESULT opcode. The callback did not
+wake the waiter, so the vote timed out after 3 s. The LPASS LPI pinctrl
+probe then failed, and the sound card did not register.
+
+Wake the waiter on the error reply. Retry the vote up to 10 times.
+
+---
+diff --git a/sound/soc/qcom/qdsp6/q6afe.c b/sound/soc/qcom/qdsp6/q6afe.c
+--- a/sound/soc/qcom/qdsp6/q6afe.c
++++ b/sound/soc/qcom/qdsp6/q6afe.c
+@@ -367,6 +367,8 @@
+ #define AFE_API_VERSION_CODEC_DMA_CONFIG	1
+ 
+ #define TIMEOUT_MS 3000
++#define AFE_VOTE_RETRIES	10
++#define AFE_VOTE_RETRY_MS	100
+ #define AFE_CMD_RESP_AVAIL	0
+ #define AFE_CMD_RESP_NONE	1
+ #define AFE_CLK_TOKEN		1024
+@@ -992,6 +994,12 @@
+ 				wake_up(&afe->wait);
+ 			}
+ 			break;
++		case AFE_CMD_REMOTE_LPASS_CORE_HW_VOTE_REQUEST:
++			/* An error reply. A success reply has its own opcode. */
++			afe->result.opcode = AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST;
++			afe->result.status = res->status;
++			wake_up(&afe->wait);
++			break;
+ 		default:
+ 			dev_err(afe->dev, "Unknown cmd 0x%x\n",	res->opcode);
+ 			break;
+@@ -1870,7 +1878,7 @@
+ 	struct q6afe *afe = dev_get_drvdata(dev->parent);
+ 	struct afe_cmd_remote_lpass_core_hw_vote_request *vote_cfg;
+ 	struct apr_pkt *pkt;
+-	int ret = 0;
++	int ret = 0, i;
+ 	int pkt_size = APR_HDR_SIZE + sizeof(*vote_cfg);
+ 	void *p __free(kfree) = kzalloc(pkt_size, GFP_KERNEL);
+ 	if (!p)
+@@ -1891,8 +1899,13 @@
+ 	strscpy(vote_cfg->client_name, client_name,
+ 			sizeof(vote_cfg->client_name));
+ 
+-	ret = afe_apr_send_pkt(afe, pkt, NULL,
+-			       AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST);
++	for (i = 0; i < AFE_VOTE_RETRIES; i++) {
++		ret = afe_apr_send_pkt(afe, pkt, NULL,
++				       AFE_CMD_RSP_REMOTE_LPASS_CORE_HW_VOTE_REQUEST);
++		if (ret != -EINVAL)
++			break;
++		msleep(AFE_VOTE_RETRY_MS);
++	}
+ 	if (ret)
+ 		dev_err(afe->dev, "AFE failed to vote (%d)\n", hw_block_id);
+ 	else
