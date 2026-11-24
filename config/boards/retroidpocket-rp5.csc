@@ -104,11 +104,11 @@ function post_family_tweaks_bsp__retroidpocket-rp5_bsp_firmware_in_initrd() {
 }
 
 ## Modules, required to boot, add them to initrd
+# Variant boards set MODULES to their panel driver.
 function post_family_tweaks_bsp__retroidpocket-rp5_bsp_modules_in_initrd() {
-	display_alert "Adding to bsp-cli" "${BOARD}: modules in initrd" "info"
-	add_file_from_stdin_to_bsp_destination "/etc/initramfs-tools/modules" <<- 'EXTRA_MODULES'
-		panel-ddic-ch13726a
-	EXTRA_MODULES
+	display_alert "Adding to bsp-cli" "${BOARD}: modules in initrd: ${MODULES}" "info"
+	# shellcheck disable=SC2086 # one module per word
+	printf '%s\n' ${MODULES} | add_file_from_stdin_to_bsp_destination "/etc/initramfs-tools/modules"
 }
 
 # armbian-firstrun waits for systemd to be ready, but snapd.seeded might cause it to hang due to wrong clock.
