@@ -57,6 +57,10 @@ function post_family_tweaks_bsp__retroidpocket-rp5_add_services() {
 	# Haptic and Gamepad rules
 	install -Dm644 $SRC/packages/bsp/retroidpocket/90-feedbackd-spmi-haptics.rules $destination/etc/udev/rules.d/90-feedbackd-spmi-haptics.rules
 	install -Dm644 $SRC/packages/bsp/retroidpocket/99-ignore-gamepad.rules $destination/etc/udev/rules.d/99-ignore-gamepad.rules
+
+	# Fan control: the pwm-fan driver starts the fan at 100%
+	install -Dm755 "${SRC}/packages/bsp/retroidpocket/retroid-fan" "${destination}/usr/bin/retroid-fan"
+	install -Dm644 "${SRC}/packages/bsp/retroidpocket/retroid-fan.service" "${destination}/usr/lib/systemd/system/retroid-fan.service"
 }
 
 function post_family_tweaks__retroidpocket-rp5_enable_services() {
@@ -71,6 +75,12 @@ function post_family_tweaks__retroidpocket-rp5_enable_services() {
 
 	chroot_sdcard systemctl enable bt-fixed-mac.service
 	return 0
+}
+
+# The fan needs no release-specific userspace: enable it for all releases.
+function post_family_tweaks__retroidpocket-rp5_enable_fan() {
+	display_alert "$BOARD" "Enable fan control" "info"
+	chroot_sdcard systemctl enable retroid-fan.service
 }
 
 function post_family_config__retroidpocket-rp5_extra_packages() {
