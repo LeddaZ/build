@@ -41,7 +41,7 @@ function post_family_tweaks_bsp__retroidpocket_ucm() {
 		codecs/qcom-lpass/rx-macro/init.conf
 		codecs/qcom-lpass/rx-macro/HeadphoneEnableSeq.conf
 		codecs/qcom-lpass/rx-macro/HeadphoneDisableSeq.conf
-		codecs/qcom-lpass/tx-macro/SoundwireMic1EnableSeq.conf
+		codecs/qcom-lpass/tx-macro/HeadphoneMicEnableSeq.conf
 		codecs/qcom-lpass/tx-macro/HeadphoneMicDisableSeq.conf
 		codecs/qcom-lpass/wsa-macro/SpeakerEnableSeq.conf
 		codecs/qcom-lpass/wsa-macro/SpeakerDisableSeq.conf
@@ -60,10 +60,17 @@ function post_family_tweaks_bsp__retroidpocket_ucm() {
 	declare file
 	for file in "${files[@]}"; do
 		install -Dm644 "${extract}/ucm2/${file}" "${ucm}/Retroid/${file}"
-		# Point the includes into the private tree.
-		sed -i -E 's|(File[[:space:]]+")/|\1/Retroid/|' "${ucm}/Retroid/${file}"
 	done
 	rm -rf "${extract}"
+
+	# Armbian changes replace files of the tarball: packages/bsp/retroidpocket/ucm.
+	declare overlay="${SRC}/packages/bsp/retroidpocket/ucm"
+	while IFS= read -r file; do
+		install -Dm644 "${overlay}/${file}" "${ucm}/Retroid/${file}"
+	done < <(cd "${overlay}" && find . -type f -name '*.conf' -printf '%P\n')
+
+	# Point the includes into the private tree.
+	find "${ucm}/Retroid" -type f -name '*.conf' -exec sed -i -E 's|(File[[:space:]]+")/|\1/Retroid/|' {} +
 
 	# The card long name comes from the SMBIOS data of the boot loader (U-Boot or OpenABL).
 	# Link each known name to the Retroid Pocket config, as ROCKNIX does.
