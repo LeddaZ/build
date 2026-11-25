@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Leonardo Ledda <leonardoledda@gmail.com>
+Date: Wed, 25 Nov 2026 13:00:00 +0100
+Subject: [PATCH] power: supply: qcom_fg: fix the charging status
+
+The battery shows "Discharging" while it charges.
+
+The charger lookup used the property name as power supply name, so it
+never found the charger. Look it up by the power-supplies reference.
+
+The current-based fallback used the PMIC sign, but get_current()
+reports a charging battery as positive since the current inversion.
+
+---
+diff --git a/drivers/power/supply/qcom_fg.c b/drivers/power/supply/qcom_fg.c
+index f248fee..c3216dd 100644
+--- a/drivers/power/supply/qcom_fg.c
++++ b/drivers/power/supply/qcom_fg.c
+@@ -915,9 +915,10 @@ static int qcom_fg_get_property(struct power_supply *psy,
+ 				val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
+ 				break;
+ 			}
+-			if (temp < 0)
++			/* get_current() reports a charging battery as positive */
++			if (temp > 0)
+ 				val->intval = POWER_SUPPLY_STATUS_CHARGING;
+-			else if (temp > 0)
++			else if (temp < 0)
+ 				val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
+ 			else
+ 				val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
+@@ -1315,10 +1316,14 @@ static int qcom_fg_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	/* Optional: Get charger power supply for status checking */
+-	chip->chg_psy = power_supply_get_by_name("power-supplies");
++	chip->chg_psy = power_supply_get_by_reference(dev_fwnode(&pdev->dev), "power-supplies");
++	if (!chip->chg_psy)
++		/* The charger is in the device tree, but not registered yet */
++		return -EPROBE_DEFER;
+ 	if (IS_ERR(chip->chg_psy)) {
+ 		ret = PTR_ERR(chip->chg_psy);
+-		dev_warn(chip->dev, "Failed to get charger supply: %d\n", ret);
++		if (ret != -ENOENT)
++			dev_warn(chip->dev, "Failed to get charger supply: %d\n", ret);
+ 		chip->chg_psy = NULL;
+ 	}
+ 
