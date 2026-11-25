@@ -244,6 +244,8 @@ function create_new_rootfs_cache_via_debootstrap() {
 	if [[ $BUILD_DESKTOP == "yes" ]]; then
 		display_alert "Installing desktop via armbian-config" "${DESKTOP_ENVIRONMENT} tier=${DESKTOP_TIER:-mid}" "info"
 		chroot_sdcard_apt_get_install armbian-config
+		# The armbian-config package reads its own desktop YAML. Use the YAML of the configng clone (the fork) instead.
+		run_host_command_logged cp -rv "${SRC}/cache/sources/armbian-configng/tools/modules/desktops/yaml/." "${SDCARD}/usr/share/armbian-config/desktops/yaml/"
 		chroot_sdcard "SUDO_USER= DEBIAN_FRONTEND=noninteractive DIALOG=read armbian-config --api module_desktops install de=${DESKTOP_ENVIRONMENT} tier=${DESKTOP_TIER:-mid} mode=build"
 	fi
 
