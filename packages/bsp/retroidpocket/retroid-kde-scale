@@ -1,0 +1,29 @@
+#!/bin/bash
+# Sets the KDE scale of the built-in display, once per user.
+# KDE picks the scale from the panel size, and that scale is too large on some Retroid Pocket devices.
+# After the first run, the user can change the scale in the display settings.
+#
+# Usage: retroid-kde-scale SCALE
+set -u
+
+scale="${1:?usage: retroid-kde-scale SCALE}"
+marker="${XDG_CONFIG_HOME:-${HOME}/.config}/retroid-kde-scale.done"
+
+[[ -e "${marker}" ]] && exit 0
+command -v kscreen-doctor > /dev/null || exit 0
+
+# KWin can start after the autostart entries. Wait for it.
+for _ in $(seq 1 20); do
+	# Lines: "Output: <id> <name> <uuid>", with color codes. DSI outputs are the built-in display.
+	outputs="$(kscreen-doctor -o 2> /dev/null | sed 's/\x1b\[[0-9;]*m//g' | awk '$1 == "Output:" && $3 ~ /^DSI-/ { print $3 }')"
+	[[ -n "${outputs}" ]] && break
+	sleep 1
+done
+[[ -n "${outputs}" ]] || exit 0
+
+for output in ${outputs}; do
+	kscreen-doctor "output.${output}.scale.${scale}" > /dev/null || exit 1
+done
+
+mkdir -p "$(dirname "${marker}")"
+touch "${marker}"

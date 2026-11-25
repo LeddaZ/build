@@ -138,6 +138,44 @@ function pre_customize_image__retroidpocket_sddm_keyboard() {
 	SDDM_CONF
 }
 
+# Default KDE scale of the built-in display. The board config sets RETROIDPOCKET_KDE_SCALE; empty keeps the KDE default.
+# The autostart entry sets the scale once per user, at the first Plasma login.
+function post_family_tweaks_bsp__retroidpocket_kde_scale() {
+	[[ -n "${RETROIDPOCKET_KDE_SCALE:-}" ]] || return 0
+	display_alert "Adding to bsp-cli" "${BOARD}: KDE scale ${RETROIDPOCKET_KDE_SCALE}" "info"
+	install -Dm755 "${SRC}/packages/bsp/retroidpocket/retroid-kde-scale" "${destination}/usr/bin/retroid-kde-scale"
+	add_file_from_stdin_to_bsp_destination "/etc/xdg/autostart/retroid-kde-scale.desktop" <<- AUTOSTART
+		[Desktop Entry]
+		Type=Application
+		Name=Retroid Pocket display scale
+		Exec=/usr/bin/retroid-kde-scale ${RETROIDPOCKET_KDE_SCALE}
+		OnlyShowIn=KDE;
+		NoDisplay=true
+		X-KDE-autostart-phase=2
+	AUTOSTART
+}
+
+# The login screen runs KWin as user sddm. Give it the same scale. KWin adds the other output settings.
+function pre_customize_image__retroidpocket_sddm_scale() {
+	[[ -n "${RETROIDPOCKET_KDE_SCALE:-}" && -x "${SDCARD}/usr/bin/kwin_wayland" && -x "${SDCARD}/usr/bin/sddm" ]] || return 0
+	display_alert "Configuring SDDM for ${BOARD}" "login screen scale ${RETROIDPOCKET_KDE_SCALE}" "info"
+	mkdir -p "${SDCARD}/var/lib/sddm/.config"
+	cat <<- KWIN_OUTPUTS > "${SDCARD}/var/lib/sddm/.config/kwinoutputconfig.json"
+		[
+		    {
+		        "data": [
+		            {
+		                "connectorName": "DSI-1",
+		                "scale": ${RETROIDPOCKET_KDE_SCALE}
+		            }
+		        ],
+		        "name": "outputs"
+		    }
+		]
+	KWIN_OUTPUTS
+	chroot_sdcard chown -R sddm:sddm /var/lib/sddm/.config
+}
+
 function post_family_tweaks_bsp__retroidpocket_governor() {
 	postinst_functions+=(retroidpocket_bsp_cli_postinst_governor)
 }
