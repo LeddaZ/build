@@ -10,6 +10,7 @@ declare -g MODULES="panel_ddic_ch13726a"
 declare -g BOOTCONFIG="none"
 declare -g GOVERNOR="schedutil"            # The kernel default is conservative: slow to raise the clock under load.
 declare -g POWER_MANAGEMENT_FEATURES="yes" # Tested on RP5: suspend and resume work.
+declare -g RETROIDPOCKET_KDE_SCALE="2"     # KDE picks 270%, too large. Also for the Flip 2, which sources this file.
 
 declare -g UEFI_GRUB_TERMINAL="gfxterm" # Use graphics in grub, for the Armbian wallpaper.
 declare -g GRUB_CMDLINE_LINUX_DEFAULT="clk_ignore_unused pd_ignore_unused arm64.nopauth efi=noruntime fbcon=rotate:3 console=ttyMSM0,115200n8"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @description Retroid Pocket SM8250 userspace in the bsp-cli package: the ALSA UCM config, the joystick LED brightness control and color save, the KWin on-screen keyboard setting, and the schedutil CPU governor default for existing installs. A package update then delivers changes without a new image.
+# @description Retroid Pocket SM8250 userspace in the bsp-cli package: the ALSA UCM config, the joystick LED brightness control and color save, the KWin on-screen keyboard setting, the default KDE scale, the SDL controller mapping, and the schedutil CPU governor default for existing installs. A package update then delivers changes without a new image. KDE images also get a Wayland login screen with the on-screen keyboard.
 
 function extension_prepare_config__retroidpocket() {
 	# RetroidPocket/alsa-ucm-conf, branch rp/v1.2.13
@@ -41,7 +41,7 @@ function post_family_tweaks_bsp__retroidpocket_ucm() {
 		codecs/qcom-lpass/rx-macro/init.conf
 		codecs/qcom-lpass/rx-macro/HeadphoneEnableSeq.conf
 		codecs/qcom-lpass/rx-macro/HeadphoneDisableSeq.conf
-		codecs/qcom-lpass/tx-macro/SoundwireMic1EnableSeq.conf
+		codecs/qcom-lpass/tx-macro/HeadphoneMicEnableSeq.conf
 		codecs/qcom-lpass/tx-macro/HeadphoneMicDisableSeq.conf
 		codecs/qcom-lpass/wsa-macro/SpeakerEnableSeq.conf
 		codecs/qcom-lpass/wsa-macro/SpeakerDisableSeq.conf
@@ -60,10 +60,17 @@ function post_family_tweaks_bsp__retroidpocket_ucm() {
 	declare file
 	for file in "${files[@]}"; do
 		install -Dm644 "${extract}/ucm2/${file}" "${ucm}/Retroid/${file}"
-		# Point the includes into the private tree.
-		sed -i -E 's|(File[[:space:]]+")/|\1/Retroid/|' "${ucm}/Retroid/${file}"
 	done
 	rm -rf "${extract}"
+
+	# Armbian changes replace files of the tarball: packages/bsp/retroidpocket/ucm.
+	declare overlay="${SRC}/packages/bsp/retroidpocket/ucm"
+	while IFS= read -r file; do
+		install -Dm644 "${overlay}/${file}" "${ucm}/Retroid/${file}"
+	done < <(cd "${overlay}" && find . -type f -name '*.conf' -printf '%P\n')
+
+	# Point the includes into the private tree.
+	find "${ucm}/Retroid" -type f -name '*.conf' -exec sed -i -E 's|(File[[:space:]]+")/|\1/Retroid/|' {} +
 
 	# The card long name comes from the SMBIOS data of the boot loader (U-Boot or OpenABL).
 	# Link each known name to the Retroid Pocket config, as ROCKNIX does.
@@ -111,6 +118,72 @@ function post_family_tweaks_bsp__retroidpocket_onscreen_keyboard() {
 		[Wayland]
 		InputMethod=/usr/share/applications/org.kde.plasma.keyboard.desktop
 	KWINRC
+}
+
+# The login screen runs on KWin Wayland, so its keyboard button shows plasma-keyboard.
+# The file name sorts after armbian.conf (armbian-firstlogin), which sets InputMethod=none.
+# Not in bsp-cli: other desktops with SDDM have no KWin.
+function pre_customize_image__retroidpocket_sddm_keyboard() {
+	[[ -x "${SDCARD}/usr/bin/kwin_wayland" && -x "${SDCARD}/usr/bin/sddm" && -f "${SDCARD}/usr/share/applications/org.kde.plasma.keyboard.desktop" ]] || return 0
+	display_alert "Configuring SDDM for ${BOARD}" "Wayland login screen with plasma-keyboard" "info"
+	mkdir -p "${SDCARD}/etc/sddm.conf.d"
+	cat <<- 'SDDM_CONF' > "${SDCARD}/etc/sddm.conf.d/retroidpocket-keyboard.conf"
+		[General]
+		DisplayServer=wayland
+		GreeterEnvironment=QT_WAYLAND_SHELL_INTEGRATION=layer-shell
+		InputMethod=
+
+		[Wayland]
+		CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1 --inputmethod plasma-keyboard
+	SDDM_CONF
+}
+
+# Default KDE scale of the built-in display. The board config sets RETROIDPOCKET_KDE_SCALE; empty keeps the KDE default.
+# The autostart entry sets the scale once per user, at the first Plasma login.
+function post_family_tweaks_bsp__retroidpocket_kde_scale() {
+	[[ -n "${RETROIDPOCKET_KDE_SCALE:-}" ]] || return 0
+	display_alert "Adding to bsp-cli" "${BOARD}: KDE scale ${RETROIDPOCKET_KDE_SCALE}" "info"
+	install -Dm755 "${SRC}/packages/bsp/retroidpocket/retroid-kde-scale" "${destination}/usr/bin/retroid-kde-scale"
+	add_file_from_stdin_to_bsp_destination "/etc/xdg/autostart/retroid-kde-scale.desktop" <<- AUTOSTART
+		[Desktop Entry]
+		Type=Application
+		Name=Retroid Pocket display scale
+		Exec=/usr/bin/retroid-kde-scale ${RETROIDPOCKET_KDE_SCALE}
+		OnlyShowIn=KDE;
+		NoDisplay=true
+		X-KDE-autostart-phase=2
+	AUTOSTART
+}
+
+# The login screen runs KWin as user sddm. Give it the same scale. KWin adds the other output settings.
+function pre_customize_image__retroidpocket_sddm_scale() {
+	[[ -n "${RETROIDPOCKET_KDE_SCALE:-}" && -x "${SDCARD}/usr/bin/kwin_wayland" && -x "${SDCARD}/usr/bin/sddm" ]] || return 0
+	display_alert "Configuring SDDM for ${BOARD}" "login screen scale ${RETROIDPOCKET_KDE_SCALE}" "info"
+	mkdir -p "${SDCARD}/var/lib/sddm/.config"
+	cat <<- KWIN_OUTPUTS > "${SDCARD}/var/lib/sddm/.config/kwinoutputconfig.json"
+		[
+		    {
+		        "data": [
+		            {
+		                "connectorName": "DSI-1",
+		                "scale": ${RETROIDPOCKET_KDE_SCALE}
+		            }
+		        ],
+		        "name": "outputs"
+		    }
+		]
+	KWIN_OUTPUTS
+	chroot_sdcard chown -R sddm:sddm /var/lib/sddm/.config
+}
+
+# SDL mapping for the built-in controller. SDL has no Linux entry for it.
+# The face buttons use the Nintendo layout: A right, B bottom, X top, Y left.
+# systemd sets environment.d variables in every desktop session.
+function post_family_tweaks_bsp__retroidpocket_gamepad_mapping() {
+	display_alert "Adding to bsp-cli" "${BOARD}: SDL controller mapping" "info"
+	add_file_from_stdin_to_bsp_destination "/etc/environment.d/60-retroid-gamepad.conf" <<- 'GAMEPAD'
+		SDL_GAMECONTROLLERCONFIG=03000000202000000130000001000000,Retroid Pocket Controller,platform:Linux,a:b1,b:b0,x:b2,y:b3,back:b6,start:b7,guide:b8,leftshoulder:b4,rightshoulder:b5,leftstick:b9,rightstick:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a3,righty:a4,lefttrigger:a7,righttrigger:a6,
+	GAMEPAD
 }
 
 function post_family_tweaks_bsp__retroidpocket_governor() {
