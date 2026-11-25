@@ -1,0 +1,196 @@
+#!/usr/bin/python3
+"""Calibrate the sticks of the Retroid Pocket controller.
+
+The tool measures the rest position and the range of each stick axis.
+It writes the result as a udev hwdb override, so the calibration stays after a reboot,
+and applies it at once. SDL games, KDE and GNOME read the calibrated range from evdev.
+Restart a running game to use the new calibration.
+
+Usage:
+  sudo retroid-joystick-calibrate          Calibrate the sticks.
+  sudo retroid-joystick-calibrate --show   Show the current range of each axis.
+  sudo retroid-joystick-calibrate --reset  Remove the calibration.
+"""
+
+import datetime
+import fcntl
+import glob
+import os
+import select
+import struct
+import subprocess
+import sys
+import time
+
+DEVICE_NAME = "Retroid Pocket Controller"
+HWDB_FILE = "/etc/udev/hwdb.d/61-retroid-joystick.hwdb"
+HWDB_MATCH = "evdev:input:b0003v2020p3001*"
+
+# Stick axes. The triggers (ABS_HAT2X/Y) are not calibrated.
+AXES = {0x00: "left X", 0x01: "left Y", 0x03: "right X", 0x04: "right Y"}
+DRIVER_RANGE = 0x580  # odin2 driver default: -0x580 to 0x580
+
+EV_ABS = 0x03
+EVENT_FORMAT = "llHHi"  # struct input_event on 64-bit
+EVENT_SIZE = struct.calcsize(EVENT_FORMAT)
+ABSINFO_FORMAT = "6i"  # value, minimum, maximum, fuzz, flat, resolution
+ABSINFO_SIZE = struct.calcsize(ABSINFO_FORMAT)
+
+CENTER_SECONDS = 2.0
+MIN_HALF_RANGE = 300  # a smaller range means that the stick did not move
+EDGE_MARGIN = 0.03  # shrink the range a little, so that full deflection reaches the edge
+MIN_FLAT_SHARE = 0.02  # deadzone: at least this share of the half range
+
+
+def eviocgabs(axis):
+	return (2 << 30) | (ABSINFO_SIZE << 16) | (ord("E") << 8) | (0x40 + axis)
+
+
+def eviocsabs(axis):
+	return (1 << 30) | (ABSINFO_SIZE << 16) | (ord("E") << 8) | (0xC0 + axis)
+
+
+def die(message):
+	print(f"retroid-joystick-calibrate: {message}", file=sys.stderr)
+	sys.exit(1)
+
+
+def find_device():
+	for name_file in sorted(glob.glob("/sys/class/input/event*/device/name")):
+		with open(name_file) as f:
+			if f.read().strip() == DEVICE_NAME:
+				event = name_file.split("/")[4]
+				return f"/dev/input/{event}", f"/sys/class/input/{event}"
+	die(f'"{DEVICE_NAME}" not found')
+
+
+def get_absinfo(fd, axis):
+	data = fcntl.ioctl(fd, eviocgabs(axis), bytes(ABSINFO_SIZE))
+	return list(struct.unpack(ABSINFO_FORMAT, data))
+
+
+def set_absinfo(fd, axis, minimum, maximum, fuzz, flat):
+	info = get_absinfo(fd, axis)
+	info[1:5] = [minimum, maximum, fuzz, flat]
+	fcntl.ioctl(fd, eviocsabs(axis), struct.pack(ABSINFO_FORMAT, *info))
+
+
+def read_events(fd, values, timeout):
+	"""Update values with the axis events that arrive within timeout seconds."""
+	ready, _, _ = select.select([fd], [], [], timeout)
+	if not ready:
+		return
+	data = os.read(fd, EVENT_SIZE * 64)
+	for offset in range(0, len(data) - EVENT_SIZE + 1, EVENT_SIZE):
+		_, _, ev_type, code, value = struct.unpack_from(EVENT_FORMAT, data, offset)
+		if ev_type == EV_ABS and code in values:
+			values[code] = value
+
+
+def wait_for_enter(fd, values, on_update):
+	"""Read events until the user presses Enter. Call on_update after each read."""
+	while True:
+		ready, _, _ = select.select([sys.stdin], [], [], 0)
+		if ready:
+			sys.stdin.readline()
+			return
+		read_events(fd, values, 0.05)
+		on_update()
+
+
+def calibrate(fd):
+	values = {axis: get_absinfo(fd, axis)[0] for axis in AXES}
+
+	print("Step 1 of 2: release both sticks. Do not touch them. Then press Enter.")
+	wait_for_enter(fd, values, lambda: None)
+	samples = {axis: [] for axis in AXES}
+	end = time.monotonic() + CENTER_SECONDS
+	while time.monotonic() < end:
+		read_events(fd, values, 0.01)
+		for axis in AXES:
+			samples[axis].append(values[axis])
+	center = {axis: round(sum(s) / len(s)) for axis, s in samples.items()}
+	noise = {axis: max(s) - min(s) for axis, s in samples.items()}
+
+	print("Step 2 of 2: turn both sticks in full circles, slowly, 3 or 4 times.")
+	print("Push them to the edge all the time. Then press Enter.")
+	low = dict(values)
+	high = dict(values)
+
+	def update():
+		for axis in AXES:
+			low[axis] = min(low[axis], values[axis])
+			high[axis] = max(high[axis], values[axis])
+		line = "  ".join(f"{AXES[a]}: {low[a]:6d} to {high[a]:6d}" for a in AXES)
+		print(f"\r{line}", end="", flush=True)
+
+	wait_for_enter(fd, values, update)
+	print()
+
+	result = {}
+	for axis, name in AXES.items():
+		# The same half range on both sides of the rest position. Take the shorter side,
+		# so that both directions reach the full value.
+		half = min(center[axis] - low[axis], high[axis] - center[axis])
+		if half < MIN_HALF_RANGE:
+			die(f"the {name} axis moved too little ({half}). Run the calibration again.")
+		half = round(half * (1 - EDGE_MARGIN))
+		flat = max(2 * noise[axis], round(half * MIN_FLAT_SHARE))
+		result[axis] = (center[axis] - half, center[axis] + half, flat)
+	return result
+
+
+def write_hwdb(result):
+	lines = [
+		f"# Written by retroid-joystick-calibrate on {datetime.date.today()}.",
+		"# Run retroid-joystick-calibrate --reset to remove the calibration.",
+		HWDB_MATCH,
+	]
+	for axis, (minimum, maximum, flat) in result.items():
+		lines.append(f" EVDEV_ABS_{axis:02X}={minimum}:{maximum}::0:{flat}")
+	os.makedirs(os.path.dirname(HWDB_FILE), exist_ok=True)
+	with open(HWDB_FILE, "w") as f:
+		f.write("\n".join(lines) + "\n")
+	subprocess.run(["systemd-hwdb", "update"], check=True)
+
+
+def show(fd):
+	for axis, name in AXES.items():
+		value, minimum, maximum, fuzz, flat, _ = get_absinfo(fd, axis)
+		print(f"{name:8s} range {minimum:6d} to {maximum:6d}  center {(minimum + maximum) // 2:6d}  deadzone {flat:4d}  now {value:6d}")
+
+
+def main():
+	args = sys.argv[1:]
+	if args not in ([], ["--show"], ["--reset"]):
+		print(__doc__.strip(), file=sys.stderr)
+		sys.exit(2)
+	if os.geteuid() != 0:
+		die("run as root: sudo retroid-joystick-calibrate")
+
+	device, _ = find_device()
+	fd = os.open(device, os.O_RDONLY | os.O_NONBLOCK)
+	try:
+		if args == ["--show"]:
+			show(fd)
+		elif args == ["--reset"]:
+			if os.path.exists(HWDB_FILE):
+				os.remove(HWDB_FILE)
+				subprocess.run(["systemd-hwdb", "update"], check=True)
+			for axis in AXES:
+				set_absinfo(fd, axis, -DRIVER_RANGE, DRIVER_RANGE, 0, 0)
+			print("Calibration removed. Restart running games.")
+			show(fd)
+		else:
+			result = calibrate(fd)
+			write_hwdb(result)
+			for axis, (minimum, maximum, flat) in result.items():
+				set_absinfo(fd, axis, minimum, maximum, 0, flat)
+			print(f"Calibration saved to {HWDB_FILE}. Restart running games.")
+			show(fd)
+	finally:
+		os.close(fd)
+
+
+if __name__ == "__main__":
+	main()
