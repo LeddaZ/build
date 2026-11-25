@@ -186,6 +186,27 @@ function post_family_tweaks_bsp__retroidpocket_gamepad_mapping() {
 	GAMEPAD
 }
 
+# The audio goes through the ADSP. With a PipeWire quantum of 256 (5.3 ms), games cause xruns.
+# Use 1024 (21 ms) while a node of the sound card is active. WirePlumber 0.4 (noble) ignores this file.
+function post_family_tweaks_bsp__retroidpocket_audio_quantum() {
+	display_alert "Adding to bsp-cli" "${BOARD}: PipeWire quantum for the sound card" "info"
+	add_file_from_stdin_to_bsp_destination "/etc/wireplumber/wireplumber.conf.d/60-retroid-audio.conf" <<- 'WIREPLUMBER'
+		monitor.alsa.rules = [
+		  {
+		    matches = [
+		      { node.name = "~alsa_output.platform-sound.*" }
+		      { node.name = "~alsa_input.platform-sound.*" }
+		    ]
+		    actions = {
+		      update-props = {
+		        node.force-quantum = 1024
+		      }
+		    }
+		  }
+		]
+	WIREPLUMBER
+}
+
 function post_family_tweaks_bsp__retroidpocket_governor() {
 	postinst_functions+=(retroidpocket_bsp_cli_postinst_governor)
 }
