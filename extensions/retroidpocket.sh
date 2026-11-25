@@ -120,6 +120,24 @@ function post_family_tweaks_bsp__retroidpocket_onscreen_keyboard() {
 	KWINRC
 }
 
+# The login screen runs on KWin Wayland, so its keyboard button shows plasma-keyboard.
+# The file name sorts after armbian.conf (armbian-firstlogin), which sets InputMethod=none.
+# Not in bsp-cli: other desktops with SDDM have no KWin.
+function pre_customize_image__retroidpocket_sddm_keyboard() {
+	[[ -x "${SDCARD}/usr/bin/kwin_wayland" && -x "${SDCARD}/usr/bin/sddm" && -f "${SDCARD}/usr/share/applications/org.kde.plasma.keyboard.desktop" ]] || return 0
+	display_alert "Configuring SDDM for ${BOARD}" "Wayland login screen with plasma-keyboard" "info"
+	mkdir -p "${SDCARD}/etc/sddm.conf.d"
+	cat <<- 'SDDM_CONF' > "${SDCARD}/etc/sddm.conf.d/retroidpocket-keyboard.conf"
+		[General]
+		DisplayServer=wayland
+		GreeterEnvironment=QT_WAYLAND_SHELL_INTEGRATION=layer-shell
+		InputMethod=
+
+		[Wayland]
+		CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1 --inputmethod plasma-keyboard
+	SDDM_CONF
+}
+
 function post_family_tweaks_bsp__retroidpocket_governor() {
 	postinst_functions+=(retroidpocket_bsp_cli_postinst_governor)
 }
