@@ -582,6 +582,63 @@
 	};
 };
 
+/*
+ * GPU clocks up to 905 MHz, as the Android GPU overlay for these devices
+ * (github.com/ItsVixano/rp5_dtb_patch). The fan cools the GPU.
+ */
+&gpu_opp_table {
+	/delete-node/ opp-670000000;
+	/delete-node/ opp-587000000;
+	/delete-node/ opp-525000000;
+	/delete-node/ opp-490000000;
+
+	opp-905000000 {
+		opp-hz = /bits/ 64 <905000000>;
+		opp-level = <RPMH_REGULATOR_LEVEL_TURBO_L0>;
+		opp-supported-hw = <0xf>;
+		opp-peak-kBps = <8171875>;
+	};
+
+	opp-880000000 {
+		opp-hz = /bits/ 64 <880000000>;
+		opp-level = <RPMH_REGULATOR_LEVEL_TURBO>;
+		opp-supported-hw = <0xf>;
+		opp-peak-kBps = <8171875>;
+	};
+
+	opp-800000000 {
+		opp-hz = /bits/ 64 <800000000>;
+		opp-level = <RPMH_REGULATOR_LEVEL_NOM_L2>;
+		opp-supported-hw = <0xf>;
+		opp-peak-kBps = <8171875>;
+	};
+
+	opp-720000000 {
+		opp-hz = /bits/ 64 <720000000>;
+		opp-level = <RPMH_REGULATOR_LEVEL_NOM>;
+		opp-supported-hw = <0xf>;
+		opp-peak-kBps = <8171875>;
+	};
+
+	opp-630000000 {
+		opp-hz = /bits/ 64 <630000000>;
+		opp-level = <RPMH_REGULATOR_LEVEL_SVS_L2>;
+		opp-supported-hw = <0xf>;
+		opp-peak-kBps = <8171875>;
+	};
+
+	opp-530000000 {
+		opp-hz = /bits/ 64 <530000000>;
+		opp-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
+		opp-supported-hw = <0xf>;
+		opp-peak-kBps = <6074218>;
+	};
+
+	opp-305000000 {
+		opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS_L1>;
+	};
+};
+
 &i2c3 {
 	clock-frequency = <400000>;
 	status = "okay";
