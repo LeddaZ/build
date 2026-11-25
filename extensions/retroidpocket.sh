@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @description Retroid Pocket SM8250 userspace in the bsp-cli package: the ALSA UCM config, the joystick LED brightness control and color save, the KWin on-screen keyboard setting, the default KDE scale, the SDL controller mapping, the joystick calibration tool, the PipeWire quantum, and the schedutil CPU governor default for existing installs. A package update then delivers changes without a new image. KDE images also get a Wayland login screen with the on-screen keyboard.
+# @description Retroid Pocket SM8250 userspace in the bsp-cli package: the ALSA UCM config, the joystick LED brightness control and color save, the KWin on-screen keyboard setting, the default KDE scale, the SDL controller mapping, the joystick calibration tool, the PipeWire quantum, the QRTR and PD mapper modules in the initrd, and the schedutil CPU governor default for existing installs. A package update then delivers changes without a new image. KDE images also get a Wayland login screen with the on-screen keyboard.
 
 function extension_prepare_config__retroidpocket() {
 	# RetroidPocket/alsa-ucm-conf, branch rp/v1.2.13
@@ -211,6 +211,21 @@ function post_family_tweaks_bsp__retroidpocket_audio_quantum() {
 		  }
 		]
 	WIREPLUMBER
+}
+
+# The initrd boots the ADSP. The ADSP looks up its audio domain over QRTR at boot.
+# Without qrtr_smd and qcom_pd_mapper in the initrd, the lookup fails and the sound card does not register.
+# udev in the initrd loads the modules when their devices appear.
+function post_family_tweaks_bsp__retroidpocket_dsp_modules_in_initrd() {
+	display_alert "Adding to bsp-cli" "${BOARD}: QRTR and PD mapper modules in initrd" "info"
+	declare file_added_to_bsp_destination
+	add_file_from_stdin_to_bsp_destination "/etc/initramfs-tools/hooks/retroidpocket-dsp" <<- 'DSP_HOOK'
+		#!/bin/sh
+		[ "$1" = "prereqs" ] && exit 0
+		. /usr/share/initramfs-tools/hook-functions
+		manual_add_modules qrtr qrtr_smd qcom_pd_mapper qcom_sysmon
+	DSP_HOOK
+	run_host_command_logged chmod -v +x "${file_added_to_bsp_destination}"
 }
 
 function post_family_tweaks_bsp__retroidpocket_governor() {
