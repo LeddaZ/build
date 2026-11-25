@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# @description Retroid Pocket SM8250 userspace in the bsp-cli package: the ALSA UCM config, the joystick LED brightness control and color save, the KWin on-screen keyboard setting, the default KDE scale, the SDL controller mapping, the joystick calibration tool, the PipeWire quantum, and the schedutil CPU governor default for existing installs. A package update then delivers changes without a new image. KDE images also get a Wayland login screen with the on-screen keyboard.
+# @description Retroid Pocket SM8250 userspace in the bsp-cli package: the ALSA UCM config, the joystick LED brightness control and color save, the KWin on-screen keyboard setting, the default KDE scale, the SDL controller mapping, the joystick calibration tool, the PipeWire quantum, a fixed Wi-Fi MAC, the QRTR and PD mapper modules in the initrd, and the schedutil CPU governor default for existing installs. A package update then delivers changes without a new image. KDE images also get a Wayland login screen with the on-screen keyboard.
 
 function extension_prepare_config__retroidpocket() {
 	# RetroidPocket/alsa-ucm-conf, branch rp/v1.2.13
@@ -211,6 +211,44 @@ function post_family_tweaks_bsp__retroidpocket_audio_quantum() {
 		  }
 		]
 	WIREPLUMBER
+}
+
+# The initrd boots the ADSP. The ADSP looks up its audio domain over QRTR at boot.
+# Without qrtr_smd and qcom_pd_mapper in the initrd, the lookup fails and the sound card does not register.
+# udev in the initrd loads the modules when their devices appear.
+function post_family_tweaks_bsp__retroidpocket_dsp_modules_in_initrd() {
+	display_alert "Adding to bsp-cli" "${BOARD}: QRTR and PD mapper modules in initrd" "info"
+	declare file_added_to_bsp_destination
+	add_file_from_stdin_to_bsp_destination "/etc/initramfs-tools/hooks/retroidpocket-dsp" <<- 'DSP_HOOK'
+		#!/bin/sh
+		[ "$1" = "prereqs" ] && exit 0
+		. /usr/share/initramfs-tools/hook-functions
+		manual_add_modules qrtr qrtr_smd qcom_pd_mapper qcom_sysmon
+	DSP_HOOK
+	run_host_command_logged chmod -v +x "${file_added_to_bsp_destination}"
+}
+
+# The QCA6390 Wi-Fi (ath11k) reports a firmware default MAC, 00:03:7f:12:xx:xx, not a unit MAC.
+# Set a fixed, locally administered MAC from the SoC serial. Fall back to /etc/machine-id.
+function post_family_tweaks_bsp__retroidpocket_wifi_mac() {
+	display_alert "Adding to bsp-cli" "${BOARD}: fixed Wi-Fi MAC from the SoC serial" "info"
+	declare file_added_to_bsp_destination
+	add_file_from_stdin_to_bsp_destination "/usr/lib/armbian/retroidpocket-wifi-mac" <<- 'WIFI_MAC_SCRIPT'
+		#!/bin/bash
+		# udev gives the interface name.
+		set -u
+		ifname="${1:?interface name}"
+		id="$(cat /sys/devices/soc0/serial_number 2> /dev/null)"
+		[[ -n ${id} ]] || id="$(< /etc/machine-id)"
+		h="$(printf 'wlan:%s' "${id}" | sha256sum | cut -c1-10)"
+		exec /usr/sbin/ip link set dev "${ifname}" address "02:${h:0:2}:${h:2:2}:${h:4:2}:${h:6:2}:${h:8:2}"
+	WIFI_MAC_SCRIPT
+	run_host_command_logged chmod -v +x "${file_added_to_bsp_destination}"
+
+	# Only the internal Wi-Fi. udev runs the script before NetworkManager takes the link.
+	add_file_from_stdin_to_bsp_destination "/etc/udev/rules.d/90-retroidpocket-wifi-mac.rules" <<- 'WIFI_MAC_RULE'
+		ACTION=="add", SUBSYSTEM=="net", KERNELS=="0000:01:00.0", DRIVERS=="ath11k_pci", RUN+="/usr/lib/armbian/retroidpocket-wifi-mac $name"
+	WIFI_MAC_RULE
 }
 
 function post_family_tweaks_bsp__retroidpocket_governor() {
