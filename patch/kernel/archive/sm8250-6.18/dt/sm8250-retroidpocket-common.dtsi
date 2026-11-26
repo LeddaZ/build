@@ -1464,6 +1464,8 @@
 		gamepad-pid = <0x3001>;
 		gamepad-rev = <0x0001>;
 
+		haptics = <&pm8150b_haptics>;
+
 		boot-gpios = <&tlmm 110 GPIO_ACTIVE_HIGH>;
 		enable-gpios = <&tlmm 111 GPIO_ACTIVE_HIGH>;
 		reset-gpios = <&tlmm 109 GPIO_ACTIVE_HIGH>;

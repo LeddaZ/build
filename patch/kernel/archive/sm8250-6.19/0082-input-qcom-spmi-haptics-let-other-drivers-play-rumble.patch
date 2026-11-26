@@ -1,0 +1,168 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Leonardo Ledda <leonardoledda@gmail.com>
+Date: Thu, 26 Nov 2026 21:52:25 +0100
+Subject: [PATCH] input: qcom-spmi-haptics: let other drivers play rumble
+
+Let a gamepad driver drive the vibration motor of the PMIC.
+Games send rumble to the gamepad, not to the spmi_haptics device.
+---
+ drivers/input/misc/qcom-spmi-haptics.c  | 76 +++++++++++++++++++++----
+ include/linux/input/qcom-spmi-haptics.h | 29 ++++++++++
+ 2 files changed, 94 insertions(+), 11 deletions(-)
+ create mode 100644 include/linux/input/qcom-spmi-haptics.h
+
+diff --git a/drivers/input/misc/qcom-spmi-haptics.c b/drivers/input/misc/qcom-spmi-haptics.c
+index 64ef78e..fd3c6ab 100644
+--- a/drivers/input/misc/qcom-spmi-haptics.c
++++ b/drivers/input/misc/qcom-spmi-haptics.c
+@@ -11,6 +11,7 @@
+ #include <linux/errno.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/input.h>
++#include <linux/input/qcom-spmi-haptics.h>
+ #include <linux/interrupt.h>
+ #include <linux/kernel.h>
+ #include <linux/log2.h>
+@@ -18,6 +19,7 @@
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/of_device.h>
++#include <linux/of_platform.h>
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ #include <linux/slab.h>
+@@ -737,22 +739,21 @@ static void spmi_haptics_close(struct input_dev *dev)
+ }
+ 
+ /**
+- * spmi_haptics_play_effect - play haptics effects
+- * @dev: input device pointer
+- * @data: data of effect
+- * @effect: effect to play
++ * spmi_haptics_rumble() - play a rumble effect
++ * @haptics: haptics device
++ * @strong: strong motor magnitude
++ * @weak: weak motor magnitude
++ *
++ * Zero magnitudes stop the effect. Callable in atomic context.
+  */
+-static int spmi_haptics_play_effect(struct input_dev *dev, void *data,
+-					struct ff_effect *effect)
++void spmi_haptics_rumble(struct spmi_haptics *haptics, u16 strong, u16 weak)
+ {
+-	struct spmi_haptics *haptics = input_get_drvdata(dev);
+-
+ 	dev_dbg(haptics->dev, "%s: Rumbling with strong: %d and weak: %d", __func__,
+-		effect->u.rumble.strong_magnitude, effect->u.rumble.weak_magnitude);
++		strong, weak);
+ 
+-	haptics->magnitude = effect->u.rumble.strong_magnitude >> 8;
++	haptics->magnitude = strong >> 8;
+ 	if (!haptics->magnitude)
+-		haptics->magnitude = effect->u.rumble.weak_magnitude >> 10;
++		haptics->magnitude = weak >> 10;
+ 
+ 	if (!haptics->magnitude) {
+ 		atomic_set(&haptics->active, 0);
+@@ -771,6 +772,22 @@ static int spmi_haptics_play_effect(struct input_dev *dev, void *data,
+ 
+ end:
+ 	schedule_work(&haptics->work);
++}
++EXPORT_SYMBOL_GPL(spmi_haptics_rumble);
++
++/**
++ * spmi_haptics_play_effect - play haptics effects
++ * @dev: input device pointer
++ * @data: data of effect
++ * @effect: effect to play
++ */
++static int spmi_haptics_play_effect(struct input_dev *dev, void *data,
++					struct ff_effect *effect)
++{
++	struct spmi_haptics *haptics = input_get_drvdata(dev);
++
++	spmi_haptics_rumble(haptics, effect->u.rumble.strong_magnitude,
++			    effect->u.rumble.weak_magnitude);
+ 
+ 	return 0;
+ }
+@@ -983,6 +1000,43 @@ static struct platform_driver spmi_haptics_driver = {
+ 		.of_match_table = spmi_haptics_match_table,
+ 	},
+ };
++
++/**
++ * spmi_haptics_get() - get the haptics device of a DT node
++ * @consumer: device that plays effects on the haptics
++ * @np: haptics DT node
++ *
++ * A device link unbinds the consumer before the haptics.
++ *
++ * Return: the haptics, NULL while the haptics driver is not bound,
++ * or an ERR_PTR() on error.
++ */
++struct spmi_haptics *spmi_haptics_get(struct device *consumer,
++				      struct device_node *np)
++{
++	struct spmi_haptics *haptics = NULL;
++	struct platform_device *pdev;
++
++	pdev = of_find_device_by_node(np);
++	if (!pdev)
++		return NULL;
++
++	device_lock(&pdev->dev);
++	if (pdev->dev.driver == &spmi_haptics_driver.driver &&
++	    device_is_bound(&pdev->dev)) {
++		if (device_link_add(consumer, &pdev->dev,
++				    DL_FLAG_AUTOREMOVE_CONSUMER))
++			haptics = platform_get_drvdata(pdev);
++		else
++			haptics = ERR_PTR(-EINVAL);
++	}
++	device_unlock(&pdev->dev);
++	put_device(&pdev->dev);
++
++	return haptics;
++}
++EXPORT_SYMBOL_GPL(spmi_haptics_get);
++
+ module_platform_driver(spmi_haptics_driver);
+ 
+ MODULE_DESCRIPTION("spmi haptics driver using ff-memless framework");
+diff --git a/include/linux/input/qcom-spmi-haptics.h b/include/linux/input/qcom-spmi-haptics.h
+new file mode 100644
+index 0000000..2314697
+--- /dev/null
++++ b/include/linux/input/qcom-spmi-haptics.h
+@@ -0,0 +1,29 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _LINUX_INPUT_QCOM_SPMI_HAPTICS_H
++#define _LINUX_INPUT_QCOM_SPMI_HAPTICS_H
++
++#include <linux/err.h>
++#include <linux/types.h>
++
++struct device;
++struct device_node;
++struct spmi_haptics;
++
++#if IS_REACHABLE(CONFIG_INPUT_QCOM_SPMI_HAPTICS)
++struct spmi_haptics *spmi_haptics_get(struct device *consumer,
++				      struct device_node *np);
++void spmi_haptics_rumble(struct spmi_haptics *haptics, u16 strong, u16 weak);
++#else
++static inline struct spmi_haptics *spmi_haptics_get(struct device *consumer,
++						    struct device_node *np)
++{
++	return ERR_PTR(-ENODEV);
++}
++
++static inline void spmi_haptics_rumble(struct spmi_haptics *haptics,
++				       u16 strong, u16 weak)
++{
++}
++#endif
++
++#endif /* _LINUX_INPUT_QCOM_SPMI_HAPTICS_H */
