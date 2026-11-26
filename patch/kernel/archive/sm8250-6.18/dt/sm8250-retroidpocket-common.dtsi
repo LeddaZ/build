@@ -564,6 +564,11 @@
 	};
 };
 
+/* No camera on these boards */
+&camcc {
+	status = "disabled";
+};
+
 &cdsp {
 	status = "okay";
 	firmware-name = "qcom/sm8250/cdsp.mbn";
