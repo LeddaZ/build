@@ -1,0 +1,46 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "spacemit,k1-x";
+};
+
+&backsensor {
+	status = "okay";
+};
+
+&ccic0 {
+	status = "okay";
+};
+
+&ccic1 {
+	status = "okay";
+};
+
+&ccic2 {
+	status = "okay";
+};
+
+&cpp {
+	status = "okay";
+};
+
+&csiphy0 {
+	status = "okay";
+};
+
+&csiphy2 {
+	status = "okay";
+};
+
+&frontsensor {
+	status = "okay";
+};
+
+&isp {
+	status = "okay";
+};
+
+&vi {
+	status = "okay";
+};

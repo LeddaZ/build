@@ -1,0 +1,10 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "spacemit,k1-x";
+};
+
+&qspi {
+	status = "disabled";
+};

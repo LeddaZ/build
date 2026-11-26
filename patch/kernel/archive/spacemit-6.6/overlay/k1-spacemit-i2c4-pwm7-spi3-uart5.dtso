@@ -1,0 +1,25 @@
+/dts-v1/;
+/plugin/;
+
+// Enable 26pin I2C4, PWM7, SPI3 and UART5
+// https://forum.banana-pi.org/t/bananapif3-gpio-wiringpi-gpiod-python3-periphery-adafruit-blinka-and-luma-examples/18948
+
+/ {
+	compatible = "spacemit,k1-x";
+};
+
+&i2c4 {
+	status = "okay";
+};
+
+&pwm7 {
+	status = "okay";
+};
+
+&spi3 {
+	status = "okay";
+};
+
+&uart5 {
+	status = "okay";
+};

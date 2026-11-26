@@ -6,12 +6,16 @@
 
 / {
 	compatible = "spacemit,k1-x";
+};
 
-	fragment@0 {
-		target = <&i2c4>;
+&dpu_online2_dsi {
+	status = "okay";
+};
 
-		__overlay__ {
-			status = "okay";
-		};
-	};
+&dsi2 {
+	status = "okay";
+};
+
+&touchscreen {
+	status = "okay";
 };
