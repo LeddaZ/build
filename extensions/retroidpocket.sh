@@ -182,7 +182,7 @@ function pre_customize_image__retroidpocket_sddm_scale() {
 function post_family_tweaks_bsp__retroidpocket_gamepad_mapping() {
 	display_alert "Adding to bsp-cli" "${BOARD}: SDL controller mapping" "info"
 	add_file_from_stdin_to_bsp_destination "/etc/environment.d/60-retroid-gamepad.conf" <<- 'GAMEPAD'
-		SDL_GAMECONTROLLERCONFIG=03000000202000000130000001000000,Retroid Pocket Controller,platform:Linux,a:b1,b:b0,x:b2,y:b3,back:b6,start:b7,guide:b8,leftshoulder:b4,rightshoulder:b5,leftstick:b9,rightstick:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a3,righty:a4,lefttrigger:a7,righttrigger:a6,
+		SDL_GAMECONTROLLERCONFIG=03000000202000000130000001000000,Retroid Pocket Controller,platform:Linux,a:b1,b:b0,x:b2,y:b3,back:b6,start:b7,guide:b8,leftshoulder:b4,rightshoulder:b5,leftstick:b9,rightstick:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a3,righty:a4,lefttrigger:a6,righttrigger:a7,
 	GAMEPAD
 }
 
