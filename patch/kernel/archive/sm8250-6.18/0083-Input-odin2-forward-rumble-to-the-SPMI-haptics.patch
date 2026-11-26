@@ -1,0 +1,136 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Leonardo Ledda <leonardoledda@gmail.com>
+Date: Thu, 26 Nov 2026 21:52:47 +0100
+Subject: [PATCH] Input: odin2: forward rumble to the SPMI haptics
+
+Games send rumble to the gamepad, but the motor is on the PMIC.
+The "haptics" DT property points to the haptics node.
+---
+ drivers/input/joystick/Kconfig |  2 +
+ drivers/input/joystick/odin2.c | 67 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 69 insertions(+)
+
+diff --git a/drivers/input/joystick/Kconfig b/drivers/input/joystick/Kconfig
+index 031b742..8d36eb3 100644
+--- a/drivers/input/joystick/Kconfig
++++ b/drivers/input/joystick/Kconfig
+@@ -347,6 +347,8 @@ config JOYSTICK_MAPLE
+ config JOYSTICK_ODIN2
+ 	tristate "AYN Odin2 gamepad"
+ 	depends on SERIAL_DEV_BUS
++	depends on INPUT_QCOM_SPMI_HAPTICS || !INPUT_QCOM_SPMI_HAPTICS
++	select INPUT_FF_MEMLESS
+ 
+ config JOYSTICK_PSXPAD_SPI
+ 	tristate "PlayStation 1/2 joypads via SPI interface"
+diff --git a/drivers/input/joystick/odin2.c b/drivers/input/joystick/odin2.c
+index 63a3217..0a728ca 100644
+--- a/drivers/input/joystick/odin2.c
++++ b/drivers/input/joystick/odin2.c
+@@ -13,11 +13,13 @@
+ #include <linux/gpio/consumer.h>
+ #include <linux/init.h>
+ #include <linux/input.h>
++#include <linux/input/qcom-spmi-haptics.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/serdev.h>
+ #include <linux/slab.h>
++#include <linux/workqueue.h>
+ #include <uapi/linux/sched/types.h>
+ 
+ #define DRIVER_NAME "odin2-gamepad"
+@@ -57,6 +59,10 @@ struct gamepad_device {
+ 	struct gpio_desc *enable_gpio;
+ 	struct gpio_desc *reset_gpio;
+ 	struct input_dev *dev_input;
++	struct device_node *haptics_node;
++	struct spmi_haptics *haptics;
++	struct work_struct rumble_work;
++	u32 rumble;
+ };
+ 
+ static u8 gamepad_data_checksum(const u8 *data, size_t count)
+@@ -177,6 +183,52 @@ static size_t gamepad_mcu_uart_rx_bytes(struct serdev_device *serdev,
+ 	return count;
+ }
+ 
++static void gamepad_rumble_work(struct work_struct *work)
++{
++	struct gamepad_device *gamepad_dev =
++		container_of(work, struct gamepad_device, rumble_work);
++	struct spmi_haptics *haptics = gamepad_dev->haptics;
++	u32 rumble;
++
++	if (!haptics) {
++		haptics = spmi_haptics_get(gamepad_dev->dev,
++					   gamepad_dev->haptics_node);
++		if (IS_ERR_OR_NULL(haptics)) {
++			dev_warn_ratelimited(gamepad_dev->dev,
++					     "Haptics not available\n");
++			return;
++		}
++		gamepad_dev->haptics = haptics;
++	}
++
++	rumble = READ_ONCE(gamepad_dev->rumble);
++	spmi_haptics_rumble(haptics, rumble >> 16, rumble & 0xffff);
++}
++
++static int gamepad_play_effect(struct input_dev *input, void *data,
++			       struct ff_effect *effect)
++{
++	struct gamepad_device *gamepad_dev = input_get_drvdata(input);
++
++	WRITE_ONCE(gamepad_dev->rumble,
++		   ((u32)effect->u.rumble.strong_magnitude << 16) |
++		   effect->u.rumble.weak_magnitude);
++	schedule_work(&gamepad_dev->rumble_work);
++
++	return 0;
++}
++
++/* Runs after the input device is gone, so no new effect can start. */
++static void gamepad_rumble_release(void *data)
++{
++	struct gamepad_device *gamepad_dev = data;
++
++	cancel_work_sync(&gamepad_dev->rumble_work);
++	if (gamepad_dev->haptics)
++		spmi_haptics_rumble(gamepad_dev->haptics, 0, 0);
++	of_node_put(gamepad_dev->haptics_node);
++}
++
+ static const struct serdev_device_ops gamepad_mcu_uart_client_ops = {
+ 	.receive_buf = gamepad_mcu_uart_rx_bytes,
+ };
+@@ -245,6 +297,12 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 
+ 	serdev_device_set_flow_control(serdev, false);
+ 
++	gamepad_dev->haptics_node = of_parse_phandle(dev->of_node, "haptics", 0);
++	INIT_WORK(&gamepad_dev->rumble_work, gamepad_rumble_work);
++	ret = devm_add_action_or_reset(dev, gamepad_rumble_release, gamepad_dev);
++	if (ret)
++		return ret;
++
+ 	gamepad_dev->dev_input = devm_input_allocate_device(dev);
+ 	if (!gamepad_dev->dev_input)
+ 		return dev_err_probe(dev, -ENOMEM, "Not enough memory for input device\n");
+@@ -278,6 +336,15 @@ static int gamepad_mcu_uart_probe(struct serdev_device *serdev)
+ 	input_set_abs_params(gamepad_dev->dev_input, ABS_HAT2X, 0, 1830, 0, 30);
+ 	input_set_abs_params(gamepad_dev->dev_input, ABS_HAT2Y, 0, 1830, 0, 30);
+ 
++	if (gamepad_dev->haptics_node) {
++		input_set_drvdata(gamepad_dev->dev_input, gamepad_dev);
++		input_set_capability(gamepad_dev->dev_input, EV_FF, FF_RUMBLE);
++		ret = input_ff_create_memless(gamepad_dev->dev_input, NULL,
++					      gamepad_play_effect);
++		if (ret)
++			return dev_err_probe(dev, ret, "Could not set up rumble\n");
++	}
++
+ 	ret = input_register_device(gamepad_dev->dev_input);
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "Could not register input device\n");
