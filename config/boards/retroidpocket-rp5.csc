@@ -13,7 +13,7 @@ declare -g POWER_MANAGEMENT_FEATURES="yes" # Tested on RP5: suspend and resume w
 declare -g RETROIDPOCKET_KDE_SCALE="2"     # KDE picks 270%, too large. Also for the Flip 2, which sources this file.
 
 declare -g UEFI_GRUB_TERMINAL="gfxterm" # Use graphics in grub, for the Armbian wallpaper.
-declare -g GRUB_CMDLINE_LINUX_DEFAULT="clk_ignore_unused pd_ignore_unused arm64.nopauth efi=noruntime fbcon=rotate:3 console=ttyMSM0,115200n8"
+declare -g GRUB_CMDLINE_LINUX_DEFAULT="arm64.nopauth efi=noruntime fbcon=rotate:3 console=ttyMSM0,115200n8"
 declare -g BOOT_FDT_FILE="qcom/sm8250-retroidpocket-rp5.dtb"
 
 declare -g SERIALCON="${SERIALCON:-tty1}"
