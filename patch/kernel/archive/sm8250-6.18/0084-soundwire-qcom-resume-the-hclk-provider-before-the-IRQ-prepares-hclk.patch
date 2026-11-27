@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Leonardo Ledda <leonardoledda@gmail.com>
+Date: Fri, 27 Nov 2026 18:46:24 +0100
+Subject: [PATCH] soundwire: qcom: resume the hclk provider before the IRQ
+ prepares hclk
+
+The system freezes when audio stops. The IRQ handler holds the clk prepare
+lock and waits for the VA macro runtime suspend. That suspend waits for the
+same lock. Every driver that prepares a clock then blocks, eMMC included.
+
+Resume the hclk provider before clk_prepare(), without the lock held.
+---
+ drivers/soundwire/qcom.c | 31 +++++++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/drivers/soundwire/qcom.c b/drivers/soundwire/qcom.c
+index a4f108f..7414cc7 100644
+--- a/drivers/soundwire/qcom.c
++++ b/drivers/soundwire/qcom.c
+@@ -2,6 +2,7 @@
+ // Copyright (c) 2019, Linaro Limited
+ 
+ #include <linux/clk.h>
++#include <linux/clk-provider.h>
+ #include <linux/completion.h>
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
+@@ -662,13 +663,42 @@ static irqreturn_t qcom_swrm_wake_irq_handler(int irq, void *dev_id)
+ 	return IRQ_HANDLED;
+ }
+ 
++/*
++ * clk_prepare() resumes the clock provider with the clk prepare lock held.
++ * A supplier of the provider can be in runtime suspend at that time, and its
++ * suspend callback also takes the clk prepare lock: the two wait forever.
++ * Resume the provider first, without the lock held.
++ */
++static struct device *qcom_swrm_hclk_provider_get(struct qcom_swrm_ctrl *ctrl)
++{
++	struct clk_hw *hw = __clk_get_hw(ctrl->hclk);
++	struct device *dev = hw ? clk_hw_get_dev(hw) : NULL;
++
++	if (!dev || pm_runtime_resume_and_get(dev) < 0)
++		return NULL;
++
++	return dev;
++}
++
++static void qcom_swrm_hclk_provider_put(struct device *dev)
++{
++	if (!dev)
++		return;
++
++	pm_runtime_mark_last_busy(dev);
++	pm_runtime_put_autosuspend(dev);
++}
++
+ static irqreturn_t qcom_swrm_irq_handler(int irq, void *dev_id)
+ {
+ 	struct qcom_swrm_ctrl *ctrl = dev_id;
++	struct device *hclk_dev;
+ 	u32 value, intr_sts, intr_sts_masked, slave_status;
+ 	u32 i;
+ 	int devnum;
+ 	int ret = IRQ_HANDLED;
++
++	hclk_dev = qcom_swrm_hclk_provider_get(ctrl);
+ 	clk_prepare_enable(ctrl->hclk);
+ 
+ 	ctrl->reg_read(ctrl, ctrl->reg_layout[SWRM_REG_INTERRUPT_STATUS],
+@@ -803,6 +833,7 @@ static irqreturn_t qcom_swrm_irq_handler(int irq, void *dev_id)
+ 	} while (intr_sts_masked);
+ 
+ 	clk_disable_unprepare(ctrl->hclk);
++	qcom_swrm_hclk_provider_put(hclk_dev);
+ 	return ret;
+ }
+ 
